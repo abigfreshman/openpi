@@ -45,6 +45,7 @@ import openpi.models_pytorch.pi0_pytorch
 import openpi.shared.normalize as _normalize
 import openpi.training.config as _config
 import openpi.training.data_loader as _data
+from dataclasses import replace
 
 
 def init_logging():
@@ -92,7 +93,7 @@ def init_wandb(config: _config.TrainConfig, *, resuming: bool, enabled: bool = T
 
 
 def setup_ddp():
-    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))     # 获取总进程数，一般情况下一台GPU对应一个进程
     use_ddp = world_size > 1
     if use_ddp and not torch.distributed.is_initialized():
         backend = "nccl" if torch.cuda.is_available() else "gloo"
@@ -102,7 +103,7 @@ def setup_ddp():
         if os.environ.get("TORCH_DISTRIBUTED_DEBUG") is None:
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
 
-    local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))
+    local_rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))   # rank在多台机器上，每一个GPU的编号， local_rank本地机器上GPU编号
     device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     if torch.cuda.is_available():
         torch.cuda.set_device(device)
@@ -526,7 +527,25 @@ def train_loop(config: _config.TrainConfig):
                 pg["lr"] = lr_schedule(global_step)
 
             # Forward pass
-            losses = model(observation, actions)
+            observation: openpi.models.Observation
+            # print(observation.images["base_0_rgb"].shape)       # images: dict[str, at.Float[ArrayT, "*b h w c"]]
+            # for k, v in observation.image_masks.items():
+            #     print(k, v.shape)
+            # observation.images["base_0_rgb"] = observation.images["base_0_rgb"].permute(0, 3, 1, 2).contiguous()  # NHWC -> NCHW
+            # observation.images["left_wrist_0_rgb"] = observation.images["left_wrist_0_rgb"].permute(0, 3, 1, 2).contiguous()  # NHWC -> NCHW
+            # observation.images["right_wrist_0_rgb"] = observation.images["right_wrist_0_rgb"].permute(0, 3, 1, 2).contiguous()  # NHWC -> NCHW
+            # tokenized_prompt: at.Int[ArrayT, "*b l"] | None = None
+            # print("==== tokenized_prompt shape ====", observation.tokenized_prompt.shape)
+            # observation.tokenized_prompt = observation.tokenized_prompt.repeat(4, 1)
+            
+            # observation = replace(
+            #     observation,
+            #     tokenized_prompt=observation.tokenized_prompt.repeat(4, 1)
+            # )
+
+            # print("==== tokenized_prompt shape ====", observation.tokenized_prompt.shape)
+
+            losses = model(observation, actions)    # (B,50.32)
             # Ensure losses is a tensor and handle different return types
             if isinstance(losses, list | tuple):
                 losses = torch.stack(losses)

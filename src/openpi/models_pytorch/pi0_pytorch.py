@@ -74,7 +74,7 @@ def make_att_2d_masks(pad_masks, att_masks):
         raise ValueError(att_masks.ndim)
     if pad_masks.ndim != 2:
         raise ValueError(pad_masks.ndim)
-
+    # 计算累加值，当前位置之前所有的元素和为当前位置元素
     cumsum = torch.cumsum(att_masks, dim=1)
     att_2d_masks = cumsum[:, None, :] <= cumsum[:, :, None]
     pad_2d_masks = pad_masks[:, None, :] * pad_masks[:, :, None]
@@ -97,7 +97,7 @@ class PI0Pytorch(nn.Module):
             precision=config.dtype,
         )
 
-        self.action_in_proj = nn.Linear(32, action_expert_config.width)
+        self.action_in_proj = nn.Linear(32, action_expert_config.width)     # 1024
         self.action_out_proj = nn.Linear(action_expert_config.width, 32)
 
         if self.pi05:
@@ -109,7 +109,7 @@ class PI0Pytorch(nn.Module):
             self.action_time_mlp_out = nn.Linear(action_expert_config.width, action_expert_config.width)
 
         torch.set_float32_matmul_precision("high")
-        self.sample_actions = torch.compile(self.sample_actions, mode="max-autotune")
+        self.sample_actions = torch.compile(self.sample_actions, mode="max-autotune")   # 编译成一个高性能的、接近手写 CUDA 的执行图
 
         # Initialize gradient checkpointing flag
         self.gradient_checkpointing_enabled = False
@@ -155,7 +155,7 @@ class PI0Pytorch(nn.Module):
 
     def _prepare_attention_masks_4d(self, att_2d_masks):
         """Helper method to prepare 4D attention masks for transformer."""
-        att_2d_masks_4d = att_2d_masks[:, None, :, :]
+        att_2d_masks_4d = att_2d_masks[:, None, :, :]   # 计算多头注意力时赠一个num_head维度
         return torch.where(att_2d_masks_4d, 0.0, -2.3819763e38)
 
     def _preprocess_observation(self, observation, *, train=True):
@@ -179,7 +179,7 @@ class PI0Pytorch(nn.Module):
         )
 
     def sample_time(self, bsize, device):
-        time_beta = sample_beta(1.5, 1.0, bsize, device)
+        time_beta = sample_beta(1.5, 1.0, bsize, device)    # 构造beta随机采样，并采样一个时间参数
         time = time_beta * 0.999 + 0.001
         return time.to(dtype=torch.float32, device=device)
 
@@ -195,11 +195,11 @@ class PI0Pytorch(nn.Module):
 
         # Process images
         for img, img_mask in zip(images, img_masks, strict=True):
-
+            # vision tower 的正向传播过程，最终通过多模态映射把特征尺度从(B,256,1152)映射到(B,256,2048)
             def image_embed_func(img):
                 return self.paligemma_with_expert.embed_image(img)
 
-            img_emb = self._apply_checkpoint(image_embed_func, img)
+            img_emb = self._apply_checkpoint(image_embed_func, img) # (B, 256, 2048)
 
             bsize, num_img_embs = img_emb.shape[:2]
 
@@ -207,7 +207,7 @@ class PI0Pytorch(nn.Module):
             pad_masks.append(img_mask[:, None].expand(bsize, num_img_embs))
 
             # Create attention masks so that image tokens attend to each other
-            att_masks += [0] * num_img_embs
+            att_masks += [0] * num_img_embs     # 图像之间共存一个block，图片token之间可以相互attend
 
         # Process language tokens
         def lang_embed_func(lang_tokens):
@@ -216,15 +216,24 @@ class PI0Pytorch(nn.Module):
             return lang_emb * math.sqrt(lang_emb_dim)
 
         lang_emb = self._apply_checkpoint(lang_embed_func, lang_tokens)
-
+        # lang_emb = lang_emb.repeat(1, 1, 32)
         embs.append(lang_emb)
         pad_masks.append(lang_masks)
 
         # full attention between image and language inputs
         num_lang_embs = lang_emb.shape[1]
-        att_masks += [0] * num_lang_embs
+        att_masks += [0] * num_lang_embs        # language token 和image token 也在一个block中，可以相互attend
 
-        embs = torch.cat(embs, dim=1)
+        # ###########   leon
+        # embs_new = []
+        # for item in embs:
+        #     print("embs item shape:", item.shape)
+        #     item = self.adjust_last_dim_to_64(item)
+        #     embs_new.append(item)
+        # ###########
+        # embs = embs_new
+
+        embs = torch.cat(embs, dim=1)           # 把image token和language token 沿着token维度拼接
         pad_masks = torch.cat(pad_masks, dim=1)
         att_masks = torch.tensor(att_masks, dtype=torch.bool, device=pad_masks.device)
 
@@ -233,6 +242,20 @@ class PI0Pytorch(nn.Module):
         att_masks = att_masks[None, :].expand(bsize, len(att_masks))
 
         return embs, pad_masks, att_masks
+
+    def adjust_last_dim_to_64(self, x: torch.Tensor, target_dim: int = 64) -> torch.Tensor:
+        last_dim = x.shape[-1]
+
+        if last_dim == target_dim:
+            return x
+        elif last_dim > target_dim:
+            # 截断最后一维
+            return x[..., :target_dim]
+        else:
+            # 重复最后一维直到 >= target_dim，然后截断到 target_dim
+            repeat_factor = (target_dim + last_dim - 1) // last_dim  # 向上取整
+            x_repeated = x.repeat(*(1 for _ in range(x.ndim - 1)), repeat_factor)
+            return x_repeated[..., :target_dim]
 
     def embed_suffix(self, state, noisy_actions, timestep):
         """Embed state, noisy_actions, timestep to prepare for Expert Gemma processing."""
@@ -246,7 +269,7 @@ class PI0Pytorch(nn.Module):
 
             # Embed state
             def state_proj_func(state):
-                return self.state_proj(state)
+                return self.state_proj(state)   # 线型映射，把状态从32维映射到1024维
 
             state_emb = self._apply_checkpoint(state_proj_func, state)
 
@@ -259,30 +282,30 @@ class PI0Pytorch(nn.Module):
 
             # Set attention masks so that image and language inputs do not attend to state or actions
             att_masks += [1]
-
+        # TODO:把时间标量timestep转化为向量，使模型能够感知连续时间的位置信息
         # Embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
         time_emb = create_sinusoidal_pos_embedding(
             timestep, self.action_in_proj.out_features, min_period=4e-3, max_period=4.0, device=timestep.device
         )
-        time_emb = time_emb.type(dtype=timestep.dtype)
+        time_emb = time_emb.type(dtype=timestep.dtype)  # (B, 1024)
 
         # Fuse timestep + action information using an MLP
         def action_proj_func(noisy_actions):
-            return self.action_in_proj(noisy_actions)
+            return self.action_in_proj(noisy_actions)   # 线型映射，把动作从32维映射到1024维
 
-        action_emb = self._apply_checkpoint(action_proj_func, noisy_actions)
+        action_emb = self._apply_checkpoint(action_proj_func, noisy_actions)    # (B, 50, 1024)
 
         if not self.pi05:
-            time_emb = time_emb[:, None, :].expand_as(action_emb)
-            action_time_emb = torch.cat([action_emb, time_emb], dim=2)
+            time_emb = time_emb[:, None, :].expand_as(action_emb)       # (B, 50, 1024)
+            action_time_emb = torch.cat([action_emb, time_emb], dim=2)  # (B, 50, 2048)
 
             # Apply MLP layers
             def mlp_func(action_time_emb):
-                x = self.action_time_mlp_in(action_time_emb)
+                x = self.action_time_mlp_in(action_time_emb)    # 线型映射，从2048维映射到1024维
                 x = F.silu(x)  # swish == silu
-                return self.action_time_mlp_out(x)
+                return self.action_time_mlp_out(x)              # 线性映射，从1024维映射到1024维
 
-            action_time_emb = self._apply_checkpoint(mlp_func, action_time_emb)
+            action_time_emb = self._apply_checkpoint(mlp_func, action_time_emb) # (B, 50, 1024)
             adarms_cond = None
         else:
             # time MLP (for adaRMS)
@@ -304,7 +327,7 @@ class PI0Pytorch(nn.Module):
         pad_masks.append(action_time_mask)
 
         # Set attention masks so that image, language and state inputs do not attend to action tokens
-        att_masks += [1] + ([0] * (self.config.action_horizon - 1))
+        att_masks += [1] + ([0] * (self.config.action_horizon - 1))     # action新建一个block，action内部token可以相互atted
 
         embs = torch.cat(embs, dim=1)
         pad_masks = torch.cat(pad_masks, dim=1)
@@ -315,19 +338,21 @@ class PI0Pytorch(nn.Module):
 
     def forward(self, observation, actions, noise=None, time=None) -> Tensor:
         """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
+        # 这里的lang_token只是对应token的索引并非向量，lang_mask表征那个token是 0 padding
         images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=True)
 
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
 
         if time is None:
-            time = self.sample_time(actions.shape[0], actions.device)
+            time = self.sample_time(actions.shape[0], actions.device)   # beta随机采样保证 time 在 (0, 1) 之间
 
         time_expanded = time[:, None, None]
-        x_t = time_expanded * noise + (1 - time_expanded) * actions
-        u_t = noise - actions
-
+        x_t = time_expanded * noise + (1 - time_expanded) * actions     # 初始状态：noise， 目标状态：actions， 线型插值生成任意时刻的中间状态
+        u_t = noise - actions   # 训练目标，t时刻状态x_t对时间t的导数, fm预测任意状态到目标状态的速度
+        # prefix_embs= cat(image_token*3 | language_token)
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, lang_tokens, lang_masks)
+        # suffix_embs= cat(state_token | action_token)
         suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(state, x_t, time)
         if (
             self.paligemma_with_expert.paligemma.language_model.layers[0].self_attn.q_proj.weight.dtype
@@ -336,13 +361,13 @@ class PI0Pytorch(nn.Module):
             suffix_embs = suffix_embs.to(dtype=torch.bfloat16)
             prefix_embs = prefix_embs.to(dtype=torch.bfloat16)
 
-        pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
-        att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
+        pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)  # 四类token中，表征那些token是pad的，true表示非pad
+        att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)  # 四类中，可以相互attend的token，通过分区block实现
 
-        att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
+        att_2d_masks = make_att_2d_masks(pad_masks, att_masks)  # 实现：1. 因果mask， 2. 分区block mask， 3. pad token不参与注意力计算
         position_ids = torch.cumsum(pad_masks, dim=1) - 1
 
-        # Prepare attention masks
+        # Prepare attention masks   # 这里的mask在att计算时是加到Q*K的结果上的
         att_2d_masks_4d = self._prepare_attention_masks_4d(att_2d_masks)
 
         # Apply gradient checkpointing if enabled
@@ -361,14 +386,14 @@ class PI0Pytorch(nn.Module):
             forward_func, prefix_embs, suffix_embs, att_2d_masks_4d, position_ids, adarms_cond
         )
 
-        suffix_out = suffix_out[:, -self.config.action_horizon :]
+        suffix_out = suffix_out[:, -self.config.action_horizon :]   # 第一个维度表示状态
         suffix_out = suffix_out.to(dtype=torch.float32)
 
         # Apply gradient checkpointing to final action projection if enabled
         def action_out_proj_func(suffix_out):
             return self.action_out_proj(suffix_out)
 
-        v_t = self._apply_checkpoint(action_out_proj_func, suffix_out)
+        v_t = self._apply_checkpoint(action_out_proj_func, suffix_out)  # (B, 50, 32)
 
         return F.mse_loss(u_t, v_t, reduction="none")
 

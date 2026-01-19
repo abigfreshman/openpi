@@ -53,7 +53,7 @@ class Pi0Config(_model.BaseModelConfig):
 
     @override
     def inputs_spec(self, *, batch_size: int = 1) -> tuple[_model.Observation, _model.Actions]:
-        image_spec = jax.ShapeDtypeStruct([batch_size, *_model.IMAGE_RESOLUTION, 3], jnp.float32)
+        image_spec = jax.ShapeDtypeStruct([batch_size, *_model.IMAGE_RESOLUTION, 3], jnp.float32)   # (1, 224, 224, 3)
         image_mask_spec = jax.ShapeDtypeStruct([batch_size], jnp.bool_)
 
         with at.disable_typechecking():

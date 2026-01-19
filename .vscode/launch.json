@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "openpi: train_pytorch (pi0_libero)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/train_pytorch.py",
+      "args": [
+        "pi0_libero",
+        "--exp_name",
+        "pytorch_test",
+        "--overwrite"
+        // "debug"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      // "justMyCode": true,
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "CUDA_VISIBLE_DEVICES": "0"
+      }
+    }
+  ]
+}

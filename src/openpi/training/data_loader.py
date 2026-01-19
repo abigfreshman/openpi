@@ -137,12 +137,13 @@ def create_torch_dataset(
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
 
-    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
+    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)      # 主要是加载meta_info, 例如：数据量、数据特征、task和episodes的对应关系等
     dataset = lerobot_dataset.LeRobotDataset(
         data_config.repo_id,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
+        episodes=[0,1,2]
     )
 
     if data_config.prompt_from_task:
@@ -165,7 +166,7 @@ def create_rlds_dataset(
         shuffle=shuffle,
         action_chunk_size=action_horizon,
         action_space=data_config.action_space,
-        filter_dict_path=data_config.filter_dict_path,
+        datasets=data_config.datasets,
     )
 
 

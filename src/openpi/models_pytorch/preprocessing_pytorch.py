@@ -71,7 +71,7 @@ def preprocess_observation_pytorch(
                     start_w = torch.randint(0, max_w + 1, (1,), device=image.device)
                     image = image[:, start_h : start_h + crop_height, start_w : start_w + crop_width, :]
 
-                # Resize back to original size
+                # Resize back to original size  # 双线性插值
                 image = torch.nn.functional.interpolate(
                     image.permute(0, 3, 1, 2),  # [b, h, w, c] -> [b, c, h, w]
                     size=(height, width),
@@ -117,18 +117,18 @@ def preprocess_observation_pytorch(
                     ).permute(0, 2, 3, 1)  # [b, c, h, w] -> [b, h, w, c]
 
             # Color augmentations for all cameras
-            # Random brightness
+            # Random brightness  # 亮度
             # Use tensor operations instead of .item() for torch.compile compatibility
             brightness_factor = 0.7 + torch.rand(1, device=image.device) * 0.6  # Random factor between 0.7 and 1.3
             image = image * brightness_factor
 
-            # Random contrast
+            # Random contrast   # 对比度
             # Use tensor operations instead of .item() for torch.compile compatibility
             contrast_factor = 0.6 + torch.rand(1, device=image.device) * 0.8  # Random factor between 0.6 and 1.4
             mean = image.mean(dim=[1, 2, 3], keepdim=True)
             image = (image - mean) * contrast_factor + mean
 
-            # Random saturation (convert to HSV, modify S, convert back)
+            # Random saturation (convert to HSV, modify S, convert back)    # 饱和度
             # For simplicity, we'll just apply a random scaling to the color channels
             # Use tensor operations instead of .item() for torch.compile compatibility
             saturation_factor = 0.5 + torch.rand(1, device=image.device) * 1.0  # Random factor between 0.5 and 1.5

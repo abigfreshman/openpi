@@ -23,6 +23,7 @@ import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
+import openpi.training.misc.polaris_config as polaris_config
 import openpi.training.misc.roboarena_config as roboarena_config
 import openpi.training.optimizer as _optimizer
 import openpi.training.weight_loaders as weight_loaders
@@ -93,8 +94,8 @@ class DataConfig:
     rlds_data_dir: str | None = None
     # Action space for DROID dataset.
     action_space: droid_rlds_dataset.DroidActionSpace | None = None
-    # Path to the data filter file for DROID dataset
-    filter_dict_path: str | None = None
+    # List of datasets to sample from: name, version, weight, and optionally filter_dict_path
+    datasets: Sequence[droid_rlds_dataset.RLDSDataset] = ()
 
 
 class GroupFactory(Protocol):
@@ -335,7 +336,7 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         # LIBERO already represents actions as deltas, but we have some old Pi0 checkpoints that are trained with this
         # extra delta transform.
         if self.extra_delta_transform:
-            delta_action_mask = _transforms.make_bool_mask(6, -1)
+            delta_action_mask = _transforms.make_bool_mask(6, -1)       # （true*6， false*1）
             data_transforms = data_transforms.push(
                 inputs=[_transforms.DeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
@@ -366,8 +367,16 @@ class RLDSDroidDataConfig(DataConfigFactory):
     # Filtering options. Can pass a path to a dictionary that maps episodes to timestep ranges
     # to tuples denoting ranges of time steps to keep (start, end). Episodes are uniquely identified with
     # f"{recording_folderpath}--{file_path}", both of which are present in the RLDS episode metadata.
-    # Path to the filter dictionary file.
-    filter_dict_path: str | None = "gs://openpi-assets/droid/droid_sample_ranges_v1_0_1.json"
+
+    # List of datasets to sample from: name, version, weight, and optionally filter_dict_path
+    datasets: Sequence[droid_rlds_dataset.RLDSDataset] = (
+        droid_rlds_dataset.RLDSDataset(
+            name="droid",
+            version="1.0.1",
+            weight=1.0,
+            filter_dict_path="gs://openpi-assets/droid/droid_sample_ranges_v1_0_1.json",
+        ),
+    )
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
@@ -410,7 +419,7 @@ class RLDSDroidDataConfig(DataConfigFactory):
             model_transforms=model_transforms,
             rlds_data_dir=self.rlds_data_dir,
             action_space=self.action_space,
-            filter_dict_path=self.filter_dict_path,
+            datasets=self.datasets,
         )
 
 
@@ -494,10 +503,12 @@ class TrainConfig:
     # Random seed that will be used by random generators during training.
     seed: int = 42
     # Global batch size.
-    batch_size: int = 32
+    # batch_size: int = 32
+    batch_size: int = 1         # debug pi0 leon
     # Number of workers to use for the data loader. Increasing this number will speed up data loading but
     # will increase memory and CPU usage.
-    num_workers: int = 2
+    # num_workers: int = 2
+    num_workers: int = 1        # debug pi0 leon
     # Number of train steps (batches) to run.
     num_train_steps: int = 30_000
 
@@ -667,6 +678,35 @@ _CONFIGS = [
         num_train_steps=30_000,
     ),
     TrainConfig(
+        # Change the name to reflect your model and dataset.
+        name="pi0_libero_torch",
+        # Here you define the model config -- In this example we use pi0 as the model
+        # architecture and perform *full* finetuning. in the examples below we show how to modify
+        # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
+        model=pi0_config.Pi0Config(),
+        # Here you define the dataset you are training on. In this example we use the Libero
+        # dataset. For your own dataset, you can change the repo_id to point to your dataset.
+        # Also modify the DataConfig to use the new config you made for your dataset above.
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(
+                # This flag determines whether we load the prompt (i.e. the task instruction) from the
+                # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
+                # a field called ``prompt`` in the input dict. The recommended setting is True.
+                prompt_from_task=True,
+            ),
+            extra_delta_transform=True,
+        ),
+        # Here you define which pre-trained checkpoint you want to load to initialize the model.
+        # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
+        # Check the base TrainConfig class for a full list of available hyperparameters.
+        num_train_steps=30_000,
+        pytorch_weight_path="/home/ps/Documents/leon/openpi/jax2torch/pi0_libero",
+    ),
+
+    TrainConfig(
         name="pi0_libero_low_mem_finetune",
         # Here is an example of loading a pi0 model for LoRA fine-tuning.
         model=pi0_config.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
@@ -756,7 +796,7 @@ _CONFIGS = [
     # Fine-tuning Aloha configs.
     #
     # This is a test config that is used to illustate how train on a custom LeRobot dataset.
-    # For instuctions on how to convert and train on your own Aloha dataset see examples/aloha_real/README.md
+    # For instructions on how to convert and train on your own Aloha dataset see examples/aloha_real/README.md
     TrainConfig(
         name="pi0_aloha_pen_uncap",
         model=pi0_config.Pi0Config(),
@@ -940,7 +980,7 @@ _CONFIGS = [
         data=FakeDataConfig(),
         batch_size=2,
         model=pi0_config.Pi0Config(paligemma_variant="dummy", action_expert_variant="dummy"),
-        weight_loader=weight_loaders.CheckpointWeightLoader("./checkpoints/debug/debug/9/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("checkpoints/debug/my_experiment/9/params"),
         overwrite=True,
         exp_name="debug",
         num_train_steps=10,
@@ -956,10 +996,9 @@ _CONFIGS = [
         exp_name="debug_pi05",
         wandb_enabled=False,
     ),
-    #
-    # RoboArena configs.
-    #
+    # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),
+    *polaris_config.get_polaris_configs(),
 ]
 
 if len({config.name for config in _CONFIGS}) != len(_CONFIGS):
@@ -969,7 +1008,12 @@ _CONFIGS_DICT = {config.name: config for config in _CONFIGS}
 
 def cli() -> TrainConfig:
     return tyro.extras.overridable_config_cli({k: (k, v) for k, v in _CONFIGS_DICT.items()})
-
+    # 1. 解析命令行
+    # 2. 第一个 positional 参数 = config 名
+    # 3. 根据 config 名选择 dataclass
+    # 4. 用 tyro 把 dataclass 转成 CLI
+    # 5. 应用 --a.b.c=xxx 形式的 override
+    # 6. 返回 config 实例
 
 def get_config(config_name: str) -> TrainConfig:
     """Get a config by name."""

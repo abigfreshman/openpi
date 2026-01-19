@@ -99,7 +99,7 @@ class PaliGemmaWithExpertModel(nn.Module):
     ):
         if adarms_cond is None:
             adarms_cond = [None, None]
-        if inputs_embeds[1] is None:
+        if inputs_embeds[1] is None:    # language and image tokens
             prefix_output = self.paligemma.language_model.forward(
                 inputs_embeds=inputs_embeds[0],
                 attention_mask=attention_mask,
@@ -111,7 +111,7 @@ class PaliGemmaWithExpertModel(nn.Module):
             prefix_past_key_values = prefix_output.past_key_values
             prefix_output = prefix_output.last_hidden_state
             suffix_output = None
-        elif inputs_embeds[0] is None:
+        elif inputs_embeds[0] is None:  # state and action tokens
             suffix_output = self.gemma_expert.model.forward(
                 inputs_embeds=inputs_embeds[1],
                 attention_mask=attention_mask,
@@ -125,7 +125,7 @@ class PaliGemmaWithExpertModel(nn.Module):
             prefix_past_key_values = None
         else:
             models = [self.paligemma.language_model, self.gemma_expert.model]
-            num_layers = self.paligemma.config.text_config.num_hidden_layers
+            num_layers = self.paligemma.config.text_config.num_hidden_layers    # 18
 
             # Check if gradient checkpointing is enabled for any of the models
             use_gradient_checkpointing = (
@@ -167,28 +167,28 @@ class PaliGemmaWithExpertModel(nn.Module):
                     hidden_states, gate = layer.input_layernorm(hidden_states, cond=adarms_cond[i])  # noqa: PLW2901
                     gates.append(gate)
 
-                    input_shape = hidden_states.shape[:-1]
-                    hidden_shape = (*input_shape, -1, layer.self_attn.head_dim)
-                    query_state = layer.self_attn.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
-                    key_state = layer.self_attn.k_proj(hidden_states).view(hidden_shape).transpose(1, 2)
-                    value_state = layer.self_attn.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+                    input_shape = hidden_states.shape[:-1]   # (B, 816) // (B, 51)
+                    hidden_shape = (*input_shape, -1, layer.self_attn.head_dim)     # (B, 816, -1, 256) // （B，51，-1，256）
+                    query_state = layer.self_attn.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)  # (B, 8, 816, 256) // (B, 8, 51, 256)
+                    key_state = layer.self_attn.k_proj(hidden_states).view(hidden_shape).transpose(1, 2)    # (B, 1, 816, 256) // (B, 1, 51, 256)
+                    value_state = layer.self_attn.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)  # (B, 1, 816, 256) // (B, 1, 51, 256)
 
                     query_states.append(query_state)
                     key_states.append(key_state)
                     value_states.append(value_state)
 
-                # Concatenate and process attention
+                # Concatenate and process attention     # 沿token维度拼接
                 query_states = torch.cat(query_states, dim=2)
                 key_states = torch.cat(key_states, dim=2)
                 value_states = torch.cat(value_states, dim=2)
 
                 dummy_tensor = torch.zeros(
-                    query_states.shape[0],
-                    query_states.shape[2],
-                    query_states.shape[-1],
+                    query_states.shape[0],  # B
+                    query_states.shape[2],  # num_token=867
+                    query_states.shape[-1], # token_dim=256
                     device=query_states.device,
                     dtype=query_states.dtype,
-                )
+                )   # 生成cos/sin旋转因子，对Q / K 做二维旋转，从而隐式注入相对位置信息。
                 cos, sin = self.paligemma.model.language_model.rotary_emb(dummy_tensor, position_ids)
                 query_states, key_states = modeling_gemma.apply_rotary_pos_emb(
                     query_states, key_states, cos, sin, unsqueeze_dim=1
@@ -215,11 +215,11 @@ class PaliGemmaWithExpertModel(nn.Module):
                 start_pos = 0
                 for i, hidden_states in enumerate(inputs_embeds):
                     layer = models[i].layers[layer_idx]
-                    end_pos = start_pos + hidden_states.shape[1]
+                    end_pos = start_pos + hidden_states.shape[1]    # 0+816  // 816
 
                     if att_output.dtype != layer.self_attn.o_proj.weight.dtype:
                         att_output = att_output.to(layer.self_attn.o_proj.weight.dtype)
-                    out_emb = layer.self_attn.o_proj(att_output[:, start_pos:end_pos])
+                    out_emb = layer.self_attn.o_proj(att_output[:, start_pos:end_pos])  # 图片和指令计算的attn再经过语音模型的attn_out_proj
 
                     # first residual
                     out_emb = modeling_gemma._gated_residual(hidden_states, out_emb, gates[i])  # noqa: SLF001
