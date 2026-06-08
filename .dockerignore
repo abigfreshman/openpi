@@ -1,3 +1,58 @@
+# Python 虚拟环境
 .venv
-checkpoints
-data
+env/
+venv/
+
+# 依赖缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pym
+
+# 日志和调试文件
+*.log
+*.out
+*.err
+
+# 数据和模型文件（大文件，通常在外部挂载）
+checkpoints/
+data/
+assets/
+jax2torch/
+wandb/
+*.h5
+*.pt
+*.ckpt
+*.tflite
+*.onnx
+
+# Git、SVN、Mercurial
+.git/
+.hg/
+.svn/
+
+# Docker 文件或系统生成文件
+Dockerfile.*
+docker-compose*.yml
+*.swp
+*.DS_Store
+*.egg-info/
+*.egg
+*.dist-info/
+
+# 临时或 IDE 文件
+*.tmp
+*.bak
+*.orig
+.vscode/
+.idea/
+*.iml
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Node.js / 前端构建目录（如果有前端）
+node_modules/
+dist/
+build/

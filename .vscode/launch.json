@@ -15,8 +15,8 @@
       ],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "justMyCode": false,
-      // "justMyCode": true,
+      // "justMyCode": false,
+      "justMyCode": true,
       "env": {
         "PYTHONUNBUFFERED": "1",
         "CUDA_VISIBLE_DEVICES": "0"

@@ -123,7 +123,7 @@ class PaliGemmaWithExpertModel(nn.Module):
             suffix_output = suffix_output.last_hidden_state
             prefix_output = None
             prefix_past_key_values = None
-        else:
+        else:   # vision的model已经经历过forward，这里的language token值是embedding层的输出结果还没有经过forward
             models = [self.paligemma.language_model, self.gemma_expert.model]
             num_layers = self.paligemma.config.text_config.num_hidden_layers    # 18
 
@@ -156,7 +156,7 @@ class PaliGemmaWithExpertModel(nn.Module):
 
             # Define the complete layer computation function for gradient checkpointing
             def compute_layer_complete(layer_idx, inputs_embeds, attention_mask, position_ids, adarms_cond):
-                models = [self.paligemma.language_model, self.gemma_expert.model]
+                models = [self.paligemma.language_model, self.gemma_expert.model]   # 两个模型层数都是18
 
                 query_states = []
                 key_states = []
@@ -215,7 +215,7 @@ class PaliGemmaWithExpertModel(nn.Module):
                 start_pos = 0
                 for i, hidden_states in enumerate(inputs_embeds):
                     layer = models[i].layers[layer_idx]
-                    end_pos = start_pos + hidden_states.shape[1]    # 0+816  // 816
+                    end_pos = start_pos + hidden_states.shape[1]    # 0+816  // 816+51
 
                     if att_output.dtype != layer.self_attn.o_proj.weight.dtype:
                         att_output = att_output.to(layer.self_attn.o_proj.weight.dtype)

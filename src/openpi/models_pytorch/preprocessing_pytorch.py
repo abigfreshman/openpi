@@ -147,7 +147,7 @@ def preprocess_observation_pytorch(
 
         out_images[key] = image
 
-    # obtain mask
+    # obtain mask   # image mask是batch维度的mask，表征当前batch中某一张图片是否可用，非像素级别mask，其维度与batch保持一致
     out_masks = {}
     for key in out_images:
         if key not in observation.image_masks:

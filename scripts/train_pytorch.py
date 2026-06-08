@@ -545,6 +545,9 @@ def train_loop(config: _config.TrainConfig):
 
             # print("==== tokenized_prompt shape ====", observation.tokenized_prompt.shape)
 
+            # actions = model.sample_actions(device=device, observation=observation, num_steps=20)
+
+
             losses = model(observation, actions)    # (B,50.32)
             # Ensure losses is a tensor and handle different return types
             if isinstance(losses, list | tuple):
@@ -561,7 +564,7 @@ def train_loop(config: _config.TrainConfig):
             if global_step < 5 and is_main and torch.cuda.is_available():
                 log_memory_usage(device, global_step, "after_backward")
 
-            # Gradient clipping
+            # Gradient clipping  梯度裁减，当所有参数的整体梯度范数(L2范数)大于max_norm时，对所有参数乘以缩放因子，因子=max_norm/total_norm
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.optimizer.clip_gradient_norm)
 
             # Optimizer step

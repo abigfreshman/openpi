@@ -156,7 +156,7 @@ class PI0Pytorch(nn.Module):
     def _prepare_attention_masks_4d(self, att_2d_masks):
         """Helper method to prepare 4D attention masks for transformer."""
         att_2d_masks_4d = att_2d_masks[:, None, :, :]   # 计算多头注意力时赠一个num_head维度
-        return torch.where(att_2d_masks_4d, 0.0, -2.3819763e38)
+        return torch.where(att_2d_masks_4d, 0.0, -2.3819763e38) # att中为true的位置返回第一个数值，为false的位置返回第二个数值
 
     def _preprocess_observation(self, observation, *, train=True):
         """Helper method to preprocess observation."""
@@ -197,21 +197,21 @@ class PI0Pytorch(nn.Module):
         for img, img_mask in zip(images, img_masks, strict=True):
             # vision tower 的正向传播过程，最终通过多模态映射把特征尺度从(B,256,1152)映射到(B,256,2048)
             def image_embed_func(img):
-                return self.paligemma_with_expert.embed_image(img)
+                return self.paligemma_with_expert.embed_image(img)      # vision tower 正向提取图片特征
 
             img_emb = self._apply_checkpoint(image_embed_func, img) # (B, 256, 2048)
 
             bsize, num_img_embs = img_emb.shape[:2]
 
             embs.append(img_emb)
-            pad_masks.append(img_mask[:, None].expand(bsize, num_img_embs))
+            pad_masks.append(img_mask[:, None].expand(bsize, num_img_embs)) # image mask转化成token mask
 
             # Create attention masks so that image tokens attend to each other
             att_masks += [0] * num_img_embs     # 图像之间共存一个block，图片token之间可以相互attend
 
-        # Process language tokens
+        # Process language tokens   # 这里只是language mode的embedding层还没有经过后续的18层transformer block层
         def lang_embed_func(lang_tokens):
-            lang_emb = self.paligemma_with_expert.embed_language_tokens(lang_tokens)
+            lang_emb = self.paligemma_with_expert.embed_language_tokens(lang_tokens)    # (B,48,2048)
             lang_emb_dim = lang_emb.shape[-1]
             return lang_emb * math.sqrt(lang_emb_dim)
 
@@ -281,7 +281,7 @@ class PI0Pytorch(nn.Module):
             pad_masks.append(state_mask)
 
             # Set attention masks so that image and language inputs do not attend to state or actions
-            att_masks += [1]
+            att_masks += [1]    # language and image 在第一个block，state在第二个block里面
         # TODO:把时间标量timestep转化为向量，使模型能够感知连续时间的位置信息
         # Embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
         time_emb = create_sinusoidal_pos_embedding(
@@ -338,7 +338,7 @@ class PI0Pytorch(nn.Module):
 
     def forward(self, observation, actions, noise=None, time=None) -> Tensor:
         """Do a full training forward pass and compute the loss (batch_size x num_steps x num_motors)"""
-        # 这里的lang_token只是对应token的索引并非向量，lang_mask表征那个token是 0 padding
+        # 这里的lang_token只是对应token的索引并非向量，lang_mask表征那个token是 0 padding，只是预处理还没有任何可学习操作
         images, img_masks, lang_tokens, lang_masks, state = self._preprocess_observation(observation, train=True)
 
         if noise is None:
@@ -349,8 +349,8 @@ class PI0Pytorch(nn.Module):
 
         time_expanded = time[:, None, None]
         x_t = time_expanded * noise + (1 - time_expanded) * actions     # 初始状态：noise， 目标状态：actions， 线型插值生成任意时刻的中间状态
-        u_t = noise - actions   # 训练目标，t时刻状态x_t对时间t的导数, fm预测任意状态到目标状态的速度
-        # prefix_embs= cat(image_token*3 | language_token)
+        u_t = noise - actions   # 训练gt，t时刻状态x_t对时间t的导数, fm预测任意状态到目标状态的速度
+        # prefix_embs= cat(image_token*3 | language_token)，经过这一步出来之后，图片经过forward但是language只是经过embedding层没有后续forward
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, lang_tokens, lang_masks)
         # suffix_embs= cat(state_token | action_token)
         suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(state, x_t, time)
@@ -414,13 +414,13 @@ class PI0Pytorch(nn.Module):
         # Compute image and language key value cache
         prefix_att_2d_masks_4d = self._prepare_attention_masks_4d(prefix_att_2d_masks)
         self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"  # noqa: SLF001
-
+        # 这一步只是把prefix部分的key，value计算出来并缓存下来，后续suffix部分的计算都可以直接使用缓存的key，value
         _, past_key_values = self.paligemma_with_expert.forward(
             attention_mask=prefix_att_2d_masks_4d,
             position_ids=prefix_position_ids,
             past_key_values=None,
             inputs_embeds=[prefix_embs, None],
-            use_cache=True,
+            use_cache=True,     # 保存decoder中每一层的k,v并返回，对于当前帧，prefix的k,v是固定的
         )
 
         dt = -1.0 / num_steps
@@ -439,7 +439,7 @@ class PI0Pytorch(nn.Module):
             )
 
             # Euler step - use new tensor assignment instead of in-place operation
-            x_t = x_t + dt * v_t
+            x_t = x_t + dt * v_t    # 预测的是速度
             time += dt
         return x_t
 
@@ -470,11 +470,11 @@ class PI0Pytorch(nn.Module):
         # Prepare attention masks
         full_att_2d_masks_4d = self._prepare_attention_masks_4d(full_att_2d_masks)
         self.paligemma_with_expert.gemma_expert.model.config._attn_implementation = "eager"  # noqa: SLF001
-
+        # 预测速度过程中，prefix部分的k,v是缓存下来的，suffix部分的q,k,v是实时计算的，注意力的计算是Cross-Attention
         outputs_embeds, _ = self.paligemma_with_expert.forward(
             attention_mask=full_att_2d_masks_4d,
             position_ids=position_ids,
-            past_key_values=past_key_values,
+            past_key_values=past_key_values,    # prefix部分的k,v缓存
             inputs_embeds=[None, suffix_embs],
             use_cache=False,
             adarms_cond=[None, adarms_cond],

@@ -694,6 +694,10 @@ _CONFIGS = [
                 # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
                 # a field called ``prompt`` in the input dict. The recommended setting is True.
                 prompt_from_task=True,
+            assets=AssetsConfig(
+                assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
+                asset_id="trossen",
+            ),
             ),
             extra_delta_transform=True,
         ),
