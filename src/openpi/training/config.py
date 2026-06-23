@@ -20,6 +20,7 @@ import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.tianyi_policy_gpt55 as tianyi_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -356,6 +357,90 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
 
 
 @dataclasses.dataclass(frozen=True)
+class TianyiDataConfig(DataConfigFactory):
+    """
+    Data config for Tianyi dual-arm humanoid robot.
+
+    Raw dataset:
+        observation.state: [16], absolute joint state
+        action: [16], absolute action target
+
+    Training target:
+        pi0-style delta action for arm joints,
+        absolute action for grippers.
+    """
+
+    default_prompt: str = "Put the clothes in the washing machine"
+    extra_delta_transform: bool = True
+    action_dim: int = 16
+
+    @override
+    def create(
+        self,
+        assets_dirs: pathlib.Path,
+        model_config: _model.BaseModelConfig,
+    ) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/state": "observation.state",
+                        "observation/image": "observation.images.cam_head",
+                        "observation/left_wrist_image": "observation.images.cam_left_wrist",
+                        "observation/right_wrist_image": "observation.images.cam_right_wrist",
+                        "actions": "action",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[
+                tianyi_policy.TienyiInputs(
+                    model_type=model_config.model_type,
+                    default_prompt=self.default_prompt,
+                )
+            ],
+            outputs=[
+                tianyi_policy.TienyiOutputs(
+                    action_dim=self.action_dim,
+                )
+            ],
+        )
+
+        if self.extra_delta_transform:
+            delta_action_mask = _transforms.make_bool_mask(
+                7,
+                -1,
+                7,
+                -1,
+            )
+
+            assert len(delta_action_mask) == self.action_dim, (
+                f"Delta action mask length {len(delta_action_mask)} "
+                f"does not match action_dim {self.action_dim}."
+            )
+
+            data_transforms = data_transforms.push(
+                inputs=[
+                    _transforms.DeltaActions(delta_action_mask),
+                ],
+                outputs=[
+                    _transforms.AbsoluteActions(delta_action_mask),
+                ],
+            )
+
+        model_transforms = ModelTransformFactory()(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class RLDSDroidDataConfig(DataConfigFactory):
     """
     Config for training on DROID, using RLDS data format (for efficient training on larger datasets).
@@ -675,6 +760,32 @@ _CONFIGS = [
         # Check the base TrainConfig class for a full list of available hyperparameters.
         num_train_steps=30_000,
     ),
+    
+    TrainConfig(
+        name="pi0_tianyi",
+        # Here is an example of loading a pi0 model for LoRA fine-tuning.
+        model=pi0_config.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
+        data=TianyiDataConfig(
+            repo_id="/media/leon/data/clothes_washing/part1",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        # The freeze filter defines which parameters should be frozen during training.
+        # We have a convenience function in the model config that returns the default freeze filter
+        # for the given model config for LoRA finetuning. Just make sure it matches the model config
+        # you chose above.
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA finetuning.
+        ema_decay=None,
+        checkpoint_base_dir="/media/leon/output/pi0/clothes_washing",
+        pytorch_weight_path="/media/leon/checkpoints/openpi/pi0/",
+        batch_size=32,
+    ),
+
     TrainConfig(
         name="pi0_libero_low_mem_finetune",
         # Here is an example of loading a pi0 model for LoRA fine-tuning.

@@ -379,7 +379,7 @@ def train_loop(config: _config.TrainConfig):
             img_concatenated = img_concatenated.cpu().numpy()
             images_to_log.append(wandb.Image(img_concatenated))
 
-        wandb.log({"camera_views": images_to_log}, step=0)
+        # wandb.log({"camera_views": images_to_log}, step=0)
 
         # Clear sample batch from memory aggressively
         del sample_batch, observation, actions, images_to_log, img_concatenated

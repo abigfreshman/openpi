@@ -60,3 +60,4 @@ tensorstore==0.1.74
 # dlimp @ git+https://github.com/kvablack/dlimp@ad72ce3a9b414db2185bc0b38461d4101a65477a
 # tensorflow-cpu==2.15.0
 tensorflow-datasets==4.9.9
+pytest

@@ -25,7 +25,7 @@ def make_tienyi_example() -> dict:
         "observation.images.cam_right_wrist": np.random.randint(
             256, size=(480, 640, 3), dtype=np.uint8
         ),
-        "prompt": "fold clothes",
+        "prompt": "Put the clothes in the washing machine",
     }
 
 
@@ -85,7 +85,7 @@ class TienyiInputs(transforms.DataTransformFn):
     """
 
     model_type: _model.ModelType
-    default_prompt: str = "fold clothes"
+    default_prompt: str = "Put the clothes in the washing machine"
 
     def __call__(self, data: dict) -> dict:
         # Support both original LeRobot dot keys and possible repacked slash keys.
