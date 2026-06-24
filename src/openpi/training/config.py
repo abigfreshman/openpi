@@ -374,6 +374,8 @@ class TianyiDataConfig(DataConfigFactory):
     extra_delta_transform: bool = True
     action_dim: int = 16
 
+    action_sequence_keys: Sequence[str] = ("action",)
+
     @override
     def create(
         self,
@@ -437,6 +439,7 @@ class TianyiDataConfig(DataConfigFactory):
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
         )
 
 
