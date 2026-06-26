@@ -32,7 +32,7 @@ def create_torch_dataloader(
     if data_config.repo_id is None:
         raise ValueError("Data config must have a repo_id")
     dataset = _data_loader.create_torch_dataset(data_config, action_horizon, model_config)
-    dataset = _data_loader.TransformedDataset(
+    dataset = _data_loader.TransformedDataset(      # 添加data、mode、repack相关的transformers
         dataset,
         [
             *data_config.repack_transforms.inputs,

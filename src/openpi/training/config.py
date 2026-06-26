@@ -349,7 +349,7 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
 
         # We return all data transforms for training and inference. No need to change anything here.
         return dataclasses.replace(
-            self.create_base_config(assets_dirs, model_config),
+            self.create_base_config(assets_dirs, model_config),     # 构建一个新的config，然后用后续的参数值替换新的config内的参数
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
@@ -386,7 +386,7 @@ class TianyiDataConfig(DataConfigFactory):
             inputs=[
                 _transforms.RepackTransform(
                     {
-                        "observation/state": "observation.state",
+                        "observation/state": "observation.state",               # pi统一的格式：我自己的数据格式
                         "observation/image": "observation.images.cam_head",
                         "observation/left_wrist_image": "observation.images.cam_left_wrist",
                         "observation/right_wrist_image": "observation.images.cam_right_wrist",
@@ -410,7 +410,7 @@ class TianyiDataConfig(DataConfigFactory):
             ],
         )
 
-        if self.extra_delta_transform:
+        if self.extra_delta_transform:                      # 自己的数据是绝对值的动作，pi0是相对值的动作，所以需要转换
             delta_action_mask = _transforms.make_bool_mask(
                 7,
                 -1,

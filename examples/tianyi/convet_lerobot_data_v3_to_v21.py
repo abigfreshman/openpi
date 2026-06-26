@@ -300,8 +300,8 @@ def process_session(
 
 
 def main(
-    data_root: str = "/media/DATA/put_clothes_in_washing_machine",
-    repo_id: str = "/media/leon/data/clothes_washing/part1",
+    data_root: str = "/media/DATA/put_clothes_in_washing_machine/lerobot_data_v3/tienyi_prod2_dualArm-gripper-3cameras_66/tienyi_prod2_dualArm-gripper-3cameras_66_Put_the_clothes_into_the_washing_machine_20260615_am",
+    repo_id: str = "/media/leon/data/clothes_washing/success_data_0615am",
     robot_type: str = "tienyi_prod2_dualArm_dexHand",
     prompt: str | None = "Put the clothes in the washing machine",
     max_episodes_per_session: int | None = None,
